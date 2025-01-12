@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"unicode"
 
 	"golang.org/x/net/html"
 )
@@ -29,7 +30,7 @@ func (scraper *RecipeScraper) Scrape(url string) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	scraper.debugNode(doc, 0)
+	// scraper.debugNode(doc, 0)
 	fmt.Println("----Ingredients found----")
 	allIngredients := parseIngredients(doc)
 	for i, ingredients := range allIngredients {
@@ -41,24 +42,44 @@ func (scraper *RecipeScraper) Scrape(url string) {
 	}
 }
 
-func getListNode(n *html.Node) *html.Node {
+func getListNodes(n *html.Node, listNodes *[]*html.Node) {
 	if n.Type == html.ElementNode && (n.Data == "ul" || n.Data == "ol") {
-		return n
+		*listNodes = append(*listNodes, n)
+		return
 	}
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		childRes := getListNode(c)
-		if childRes != nil {
-			return childRes
+		getListNodes(c, listNodes)
+	}
+}
+
+func getEnglishString(s string) string {
+	englishString := ""
+	for _, r := range s {
+		if unicode.IsLetter(r) || unicode.IsSpace(r) || isPunctuation(r) || isNumber(r) {
+			englishString += string(r)
 		}
 	}
-	return nil
+	return englishString
+}
+
+func isNumber(r rune) bool {
+	return unicode.IsDigit(r) || unicode.Is(unicode.No, r)
+}
+
+func isPunctuation(r rune) bool {
+	switch r {
+	case '.', ',', ';', ':', '\'', '"', '!', '?', '-', '(', ')', '[', ']', '{', '}', '/', '\\', '&', '%', '$', '#', '@', '*', '+', '=', '<', '>', '|', '~', '`':
+		return true
+	default:
+		return false
+	}
 }
 
 func getIngredient(n *html.Node) string {
 	ingredient := ""
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
 		if c.Type == html.TextNode {
-			ingredient += c.Data
+			ingredient += getEnglishString(c.Data)
 		}
 		ingredient += getIngredient(c)
 	}
@@ -89,9 +110,10 @@ func getIngredientListNodes(n *html.Node, ingredientListNodes *[]*html.Node) boo
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
 		if getIngredientListNodes(c, ingredientListNodes) {
 			// check if c contains list
-			listNode := getListNode(c)
-			if listNode != nil {
-				*ingredientListNodes = append(*ingredientListNodes, listNode)
+			listNodes := []*html.Node{}
+			getListNodes(c, &listNodes)
+			if len(listNodes) > 0 {
+				*ingredientListNodes = append(*ingredientListNodes, listNodes...)
 				return false
 			}
 			return true
@@ -109,9 +131,21 @@ func parseIngredients(n *html.Node) [][]string {
 	// For now I'm only going to handle the first one
 	ingredientLists := [][]string{}
 	for _, node := range ingredientListNodes {
-		ingredientLists = append(ingredientLists, getIngredients(node))
+		ingredientList := getIngredients(node)
+		if isIngredientList(ingredientList) {
+			ingredientLists = append(ingredientLists, getIngredients(node))
+		}
 	}
 	return ingredientLists
+}
+
+func isIngredientList(ingredientList []string) bool {
+	for _, ingredient := range ingredientList {
+		if isNumber([]rune(ingredient)[0]) {
+			return true
+		}
+	}
+	return false
 }
 
 // Recursive function to print HTML nodes with indentation for better readability
