@@ -31,15 +31,27 @@ func (scraper *RecipeScraper) Scrape(url string) {
 		log.Fatal(err)
 	}
 	// scraper.debugNode(doc, 0)
+	fmt.Println()
+	fmt.Printf("Recipe for url: %s\n", url)
 	fmt.Println("----Ingredients found----")
 	allIngredients := parseIngredients(doc)
-	for i, ingredients := range allIngredients {
-		fmt.Printf("----List %d----\n", i+1)
-		for index, ingredient := range ingredients {
+	index := 0
+	for _, ingredients := range allIngredients {
+		for _, ingredient := range ingredients {
 			fmt.Printf("%d. %s\n", index+1, ingredient)
+			index++
 		}
-		fmt.Println("---------------")
 	}
+	fmt.Println("----Instructions found----")
+	allInstructions := parseInstructions(doc)
+	index = 0
+	for _, instructions := range allInstructions {
+		for _, instruction := range instructions {
+			fmt.Printf("%d. %s\n", index+1, instruction)
+			index++
+		}
+	}
+	fmt.Println()
 }
 
 func getListNodes(n *html.Node, listNodes *[]*html.Node) {
@@ -75,45 +87,57 @@ func isPunctuation(r rune) bool {
 	}
 }
 
-func getIngredient(n *html.Node) string {
-	ingredient := ""
+func getListChild(n *html.Node) string {
+	child := ""
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
 		if c.Type == html.TextNode {
-			ingredient += getEnglishString(c.Data)
+			child += getEnglishString(c.Data)
+		} else if c.Type == html.ElementNode && (c.Data == "noscript" || c.Data == "figcaption") {
+			continue
 		}
-		ingredient += getIngredient(c)
+		child += getListChild(c)
 	}
-	return strings.TrimSpace(ingredient)
+	return strings.TrimSpace(child)
 }
 
-func getIngredients(n *html.Node) []string {
-	ingredients := []string{}
+func getLists(n *html.Node) []string {
+	lists := []string{}
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
 		if c.Type == html.ElementNode && c.Data == "li" {
-			ingredient := getIngredient(c)
-			if len(ingredient) > 0 {
-				ingredients = append(ingredients, ingredient)
+			child := getListChild(c)
+			if len(child) > 0 {
+				lists = append(lists, child)
 			}
 		}
 	}
-	if len(ingredients) == 0 {
+	if len(lists) == 0 {
 		return nil
 	}
-	return ingredients
+	return lists
 }
 
-func getIngredientListNodes(n *html.Node, ingredientListNodes *[]*html.Node) bool {
-	if n.Type == html.TextNode && strings.Compare(strings.ToLower(n.Data), "ingredients") == 0 {
-		log.Print("Found potential ingredients")
+func matchesTargets(targets []string, check string) bool {
+	lowerCaseCheck := strings.TrimSpace((strings.ToLower(check)))
+	for _, target := range targets {
+		if strings.Compare(strings.ToLower(target), lowerCaseCheck) == 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func getTargetListNodes(n *html.Node, targetListNodes *[]*html.Node, targets []string) bool {
+	if n.Type == html.TextNode && matchesTargets(targets, n.Data) {
+		log.Print("Found potential target")
 		return true
 	}
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		if getIngredientListNodes(c, ingredientListNodes) {
+		if getTargetListNodes(c, targetListNodes, targets) {
 			// check if c contains list
 			listNodes := []*html.Node{}
 			getListNodes(c, &listNodes)
 			if len(listNodes) > 0 {
-				*ingredientListNodes = append(*ingredientListNodes, listNodes...)
+				*targetListNodes = append(*targetListNodes, listNodes...)
 				return false
 			}
 			return true
@@ -122,18 +146,31 @@ func getIngredientListNodes(n *html.Node, ingredientListNodes *[]*html.Node) boo
 	return false
 }
 
+func parseInstructions(n *html.Node) [][]string {
+	instructionListNodes := []*html.Node{}
+	getTargetListNodes(n, &instructionListNodes, []string{"Instructions", "Directions"})
+	if len(instructionListNodes) == 0 {
+		log.Fatal("Could not find instructions")
+	}
+	instructionLists := [][]string{}
+	for _, node := range instructionListNodes {
+		instructionList := getLists(node)
+		instructionLists = append(instructionLists, instructionList)
+	}
+	return instructionLists
+}
+
 func parseIngredients(n *html.Node) [][]string {
 	ingredientListNodes := []*html.Node{}
-	getIngredientListNodes(n, &ingredientListNodes)
+	getTargetListNodes(n, &ingredientListNodes, []string{"ingredients"})
 	if len(ingredientListNodes) == 0 {
 		log.Fatal("Could not find ingredients")
 	}
-	// For now I'm only going to handle the first one
 	ingredientLists := [][]string{}
 	for _, node := range ingredientListNodes {
-		ingredientList := getIngredients(node)
+		ingredientList := getLists(node)
 		if isIngredientList(ingredientList) {
-			ingredientLists = append(ingredientLists, getIngredients(node))
+			ingredientLists = append(ingredientLists, ingredientList)
 		}
 	}
 	return ingredientLists

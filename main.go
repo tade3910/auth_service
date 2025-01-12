@@ -10,5 +10,6 @@ func main() {
 	scaper.Scrape("https://www.allrecipes.com/chef-johns-jollof-rice-recipe-7499757")
 	scaper.Scrape("https://sweetandsavorymeals.com/jerk-chicken-recipe/")
 	scaper.Scrape("https://simplehomeedit.com/recipe/baked-garlic-chicken-breast/")
+	scaper.Scrape("https://tastesbetterfromscratch.com/tres-leches-cake/")
 
 }
